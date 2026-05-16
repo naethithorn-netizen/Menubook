@@ -229,7 +229,7 @@ export default function MenuBook() {
     try {
       const [meta, b64] = form.image.split(",");
       const mime = meta.split(":")[1].split(";")[0];
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/ai", {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({
           model:"claude-sonnet-4-20250514", max_tokens:1200,
@@ -261,7 +261,7 @@ export default function MenuBook() {
     if (!menuName?.trim()) return;
     setAILoading(true);
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/ai", {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({
           model:"claude-sonnet-4-20250514", max_tokens:600,
