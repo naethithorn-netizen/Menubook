@@ -223,27 +223,38 @@ export default function MenuBook() {
     r.readAsDataURL(f);
   };
 
+  /* ── helper: clean AI text → parse JSON safely ── */
+  const parseAIJson = (d) => {
+    if (d?.error) throw new Error(d.error);
+    const raw = d?.content?.[0]?.text;
+    if (!raw) throw new Error("AI ไม่ส่งผลลัพธ์กลับมา");
+    // strip markdown fences: ```json ... ``` หรือ ``` ... ```
+    const clean = raw.replace(/```(?:json)?\s*/gi, "").replace(/```/g, "").trim();
+    return JSON.parse(clean);
+  };
+
   /* AI: analyze photo → metadata + ingredients */
   const analyzePhoto = async () => {
     if (!form.image) return;
     setAnalyzing(true);
+    setAiError("");
     try {
       const [meta, b64] = form.image.split(",");
       const mime = meta.split(":")[1].split(";")[0];
       const res = await fetch("/api/ai", {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({
-          model:"claude-sonnet-4-20250514", max_tokens:1200,
+          model:"gemini", max_tokens:1200,
           messages:[{ role:"user", content:[
             { type:"image", source:{ type:"base64", media_type:mime, data:b64 } },
-            { type:"text", text:`วิเคราะห์อาหารในรูปนี้ ตอบ JSON เท่านั้น ห้ามมี markdown backticks:
-{"name":"ชื่ออาหาร (ภาษาไทย)","desc":"คำอธิบาย 1-2 ประโยค","category":"อาหารไทย/อาหารญี่ปุ่น/อาหารฝรั่ง/ของหวาน/เครื่องดื่ม/อาหารจีน/อาหารเกาหลี/อื่นๆ","tags":["แท็ก1","แท็ก2","แท็ก3"],"ai":"ข้อมูลเพิ่มเติม รสชาติ ส่วนผสม","ingredients":["วัตถุดิบ1","วัตถุดิบ2","..."]}
-ใส่วัตถุดิบหลักทุกอย่างที่ใช้ทำเมนูนี้ใน ingredients (ภาษาไทย, 8-15 รายการ)` }
+            { type:"text", text:`วิเคราะห์อาหารในรูปนี้ ตอบ JSON เท่านั้น ห้ามมี markdown:
+{"name":"ชื่ออาหาร (ภาษาไทย)","desc":"คำอธิบาย 1-2 ประโยค","category":"อาหารไทย/อาหารญี่ปุ่น/อาหารฝรั่ง/ของหวาน/เครื่องดื่ม/อาหารจีน/อาหารเกาหลี/อื่นๆ","tags":["แท็ก1","แท็ก2","แท็ก3"],"ai":"ข้อมูลเพิ่มเติม รสชาติ ส่วนผสม","ingredients":["วัตถุดิบ1","วัตถุดิบ2"]}
+วัตถุดิบ 8-15 รายการ (ภาษาไทย)` }
           ]}]
         })
       });
       const d = await res.json();
-      const p = JSON.parse(d.content[0].text.trim());
+      const p = parseAIJson(d);
       setForm(prev => ({
         ...prev,
         name:        p.name        || prev.name,
@@ -251,12 +262,12 @@ export default function MenuBook() {
         category:    p.category    || prev.category,
         tags:        p.tags        || prev.tags,
         ai:          p.ai          || "",
-        ingredients: p.ingredients ? p.ingredients.map(mkIngr) : prev.ingredients,
+        ingredients: p.ingredients?.length ? p.ingredients.map(mkIngr) : prev.ingredients,
       }));
     } catch(e) {
-      console.error(e);
-      setAiError("⚠️ AI ไม่ตอบสนอง — ลองใหม่อีกครั้ง หรือรอ 1 นาทีแล้วลอง");
-      setTimeout(() => setAiError(""), 5000);
+      console.error("analyzePhoto error:", e.message);
+      setAiError(`⚠️ ${e.message || "AI ไม่ตอบสนอง"} — ลองใหม่อีกครั้ง`);
+      setTimeout(() => setAiError(""), 6000);
     }
     setAnalyzing(false);
   };
@@ -265,24 +276,27 @@ export default function MenuBook() {
   const fetchIngredients = async (menuName, setAILoading, onResult) => {
     if (!menuName?.trim()) return;
     setAILoading(true);
+    setAiError("");
     try {
       const res = await fetch("/api/ai", {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({
-          model:"claude-sonnet-4-20250514", max_tokens:600,
-          messages:[{ role:"user", content:`รายการวัตถุดิบทั้งหมดที่ใช้ทำ "${menuName}" ตอบ JSON เท่านั้น ห้ามมี markdown:
-{"ingredients":["วัตถุดิบ1","วัตถุดิบ2","..."]}
-ใส่วัตถุดิบสำคัญให้ครบ 8-14 รายการ (ภาษาไทย)` }]
+          model:"gemini", max_tokens:600,
+          messages:[{ role:"user", content:`วัตถุดิบทั้งหมดที่ใช้ทำ "${menuName}" ตอบ JSON เท่านั้น ห้ามมี markdown:
+{"ingredients":["วัตถุดิบ1","วัตถุดิบ2"]}
+ใส่วัตถุดิบสำคัญ 8-14 รายการ (ภาษาไทย)` }]
         })
       });
       const d = await res.json();
-      const p = JSON.parse(d.content[0].text.trim());
+      const p = parseAIJson(d);
       if (p.ingredients?.length) onResult(p.ingredients.map(mkIngr));
     } catch(e) {
-      console.error(e);
-      setAiError("⚠️ AI ไม่ตอบสนอง — ลองใหม่อีกครั้ง หรือรอ 1 นาทีแล้วลอง");
-      setTimeout(() => setAiError(""), 5000);
+      console.error("fetchIngredients error:", e.message);
+      setAiError(`⚠️ ${e.message || "AI ไม่ตอบสนอง"} — ลองใหม่อีกครั้ง`);
+      setTimeout(() => setAiError(""), 6000);
     }
+    setAILoading(false);
+  };
     setAILoading(false);
   };
 
