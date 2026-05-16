@@ -297,8 +297,6 @@ export default function MenuBook() {
     }
     setAILoading(false);
   };
-    setAILoading(false);
-  };
 
   const addMenu = () => {
     if (!form.name.trim()) return;
