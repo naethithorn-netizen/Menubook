@@ -1,4 +1,3 @@
-// แต่ละ model ใช้ API version ต่างกัน
 const MODELS = [
   { name: "gemini-2.0-flash",      version: "v1beta" },
   { name: "gemini-2.0-flash-lite", version: "v1beta" },
@@ -8,32 +7,43 @@ const MODELS = [
 
 async function callGemini(apiKey, parts, maxTokens, index = 0) {
   if (index >= MODELS.length) {
-    throw new Error("AI ไม่ตอบสนองในขณะนี้ — รอ 1 นาทีแล้วลองใหม่");
+    throw new Error("ทุก model ไม่ตอบสนอง — กรุณารอ 1 นาทีแล้วลองใหม่");
   }
 
   const { name, version } = MODELS[index];
   const url = `https://generativelanguage.googleapis.com/${version}/models/${name}:generateContent?key=${apiKey}`;
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ parts }],
-      generationConfig: { maxOutputTokens: maxTokens || 1000 },
-    }),
-  });
+  let response, data;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts }],
+        generationConfig: { maxOutputTokens: maxTokens || 1000 },
+      }),
+    });
+    data = await response.json();
+  } catch (fetchErr) {
+    console.error(`${name} fetch error:`, fetchErr.message);
+    return callGemini(apiKey, parts, maxTokens, index + 1);
+  }
 
-  const data = await response.json();
-
-  // rate limit หรือ model ไม่รองรับ → ลอง model ถัดไป
-  if (response.status === 429 || response.status === 404 || data.error) {
-    console.log(`${name} failed (${response.status}), trying next...`);
-    await new Promise((r) => setTimeout(r, 800));
+  // ถ้า rate limit, model ไม่รองรับ, หรือ error → ลอง model ถัดไป
+  if (!response.ok || data.error) {
+    const reason = data.error?.message || `HTTP ${response.status}`;
+    console.log(`${name} failed: ${reason} → trying next model`);
+    await new Promise((r) => setTimeout(r, 500));
     return callGemini(apiKey, parts, maxTokens, index + 1);
   }
 
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-  if (!text) throw new Error("AI ไม่ส่งผลลัพธ์กลับมา");
+  if (!text) {
+    console.log(`${name} returned empty text → trying next model`);
+    return callGemini(apiKey, parts, maxTokens, index + 1);
+  }
+
+  console.log(`✅ Success with ${name}`);
   return text;
 }
 
@@ -44,11 +54,15 @@ export default async function handler(req, res) {
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    return res.status(500).json({ error: "GEMINI_API_KEY ยังไม่ได้ตั้งค่าใน Vercel" });
+    return res.status(500).json({ error: "❌ GEMINI_API_KEY ยังไม่ได้ตั้งค่าใน Vercel Environment Variables" });
   }
 
   try {
     const { messages, max_tokens } = req.body;
+    if (!messages?.length) {
+      return res.status(400).json({ error: "No messages provided" });
+    }
+
     const lastMessage = messages[messages.length - 1];
 
     // แปลง Anthropic format → Gemini parts
@@ -67,7 +81,7 @@ export default async function handler(req, res) {
         }
       }
     } else {
-      parts.push({ text: lastMessage.content });
+      parts.push({ text: String(lastMessage.content) });
     }
 
     const text = await callGemini(apiKey, parts, max_tokens);
@@ -77,7 +91,7 @@ export default async function handler(req, res) {
       content: [{ type: "text", text }],
     });
   } catch (error) {
-    console.error("AI error:", error.message);
+    console.error("Handler error:", error.message);
     return res.status(500).json({ error: error.message });
   }
 }

@@ -233,14 +233,33 @@ export default function MenuBook() {
     return JSON.parse(clean);
   };
 
+  /* ── compress image to max 800px, quality 0.75 ── */
+  const compressImage = (dataUrl) => new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 800;
+      let { width: w, height: h } = img;
+      if (w > MAX || h > MAX) {
+        if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+        else        { w = Math.round(w * MAX / h); h = MAX; }
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL("image/jpeg", 0.75));
+    };
+    img.src = dataUrl;
+  });
+
   /* AI: analyze photo → metadata + ingredients */
   const analyzePhoto = async () => {
     if (!form.image) return;
     setAnalyzing(true);
     setAiError("");
     try {
-      const [meta, b64] = form.image.split(",");
-      const mime = meta.split(":")[1].split(";")[0];
+      const compressed = await compressImage(form.image);
+      const [meta, b64] = compressed.split(",");
+      const mime = "image/jpeg";
       const res = await fetch("/api/ai", {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({
