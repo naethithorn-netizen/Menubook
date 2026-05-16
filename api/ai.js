@@ -1,16 +1,18 @@
+// แต่ละ model ใช้ API version ต่างกัน
 const MODELS = [
-  "gemini-2.0-flash",
-  "gemini-1.5-flash",
-  "gemini-1.5-flash-8b",
+  { name: "gemini-2.0-flash",      version: "v1beta" },
+  { name: "gemini-2.0-flash-lite", version: "v1beta" },
+  { name: "gemini-1.5-flash",      version: "v1"     },
+  { name: "gemini-1.5-flash-8b",   version: "v1"     },
 ];
 
-async function callGemini(apiKey, parts, maxTokens, modelIndex = 0) {
-  if (modelIndex >= MODELS.length) {
-    throw new Error("All models rate limited. Please wait 1 minute and try again.");
+async function callGemini(apiKey, parts, maxTokens, index = 0) {
+  if (index >= MODELS.length) {
+    throw new Error("AI ไม่ตอบสนองในขณะนี้ — รอ 1 นาทีแล้วลองใหม่");
   }
 
-  const model = MODELS[modelIndex];
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const { name, version } = MODELS[index];
+  const url = `https://generativelanguage.googleapis.com/${version}/models/${name}:generateContent?key=${apiKey}`;
 
   const response = await fetch(url, {
     method: "POST",
@@ -21,23 +23,17 @@ async function callGemini(apiKey, parts, maxTokens, modelIndex = 0) {
     }),
   });
 
-  // ถ้า rate limit → ลอง model ถัดไปเลย
-  if (response.status === 429) {
-    console.log(`${model} rate limited, trying next model...`);
-    await new Promise((r) => setTimeout(r, 1000));
-    return callGemini(apiKey, parts, maxTokens, modelIndex + 1);
-  }
-
   const data = await response.json();
 
-  if (!response.ok) {
-    const msg = data.error?.message || "Gemini API error";
-    throw new Error(msg);
+  // rate limit หรือ model ไม่รองรับ → ลอง model ถัดไป
+  if (response.status === 429 || response.status === 404 || data.error) {
+    console.log(`${name} failed (${response.status}), trying next...`);
+    await new Promise((r) => setTimeout(r, 800));
+    return callGemini(apiKey, parts, maxTokens, index + 1);
   }
 
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-  if (!text) throw new Error("AI ไม่ได้ส่งผลลัพธ์กลับมา");
-
+  if (!text) throw new Error("AI ไม่ส่งผลลัพธ์กลับมา");
   return text;
 }
 
@@ -76,7 +72,7 @@ export default async function handler(req, res) {
 
     const text = await callGemini(apiKey, parts, max_tokens);
 
-    // แปลง response กลับเป็น Anthropic format
+    // แปลงกลับเป็น Anthropic format
     return res.status(200).json({
       content: [{ type: "text", text }],
     });
