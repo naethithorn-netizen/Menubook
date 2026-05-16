@@ -188,6 +188,7 @@ export default function MenuBook() {
   const [analyzing, setAnalyzing] = useState(false);   // photo analysis
   const [formIngrAI, setFormIngrAI]     = useState(false); // ingredient AI in add-form
   const [detailIngrAI, setDetailIngrAI] = useState(false); // ingredient AI in detail
+  const [aiError, setAiError]           = useState("");
   const fileRef = useRef(null);
 
   useEffect(() => {
@@ -252,7 +253,11 @@ export default function MenuBook() {
         ai:          p.ai          || "",
         ingredients: p.ingredients ? p.ingredients.map(mkIngr) : prev.ingredients,
       }));
-    } catch(e) { console.error(e); }
+    } catch(e) {
+      console.error(e);
+      setAiError("⚠️ AI ไม่ตอบสนอง — ลองใหม่อีกครั้ง หรือรอ 1 นาทีแล้วลอง");
+      setTimeout(() => setAiError(""), 5000);
+    }
     setAnalyzing(false);
   };
 
@@ -273,7 +278,11 @@ export default function MenuBook() {
       const d = await res.json();
       const p = JSON.parse(d.content[0].text.trim());
       if (p.ingredients?.length) onResult(p.ingredients.map(mkIngr));
-    } catch(e) { console.error(e); }
+    } catch(e) {
+      console.error(e);
+      setAiError("⚠️ AI ไม่ตอบสนอง — ลองใหม่อีกครั้ง หรือรอ 1 นาทีแล้วลอง");
+      setTimeout(() => setAiError(""), 5000);
+    }
     setAILoading(false);
   };
 
@@ -355,6 +364,16 @@ export default function MenuBook() {
       </div>
 
       <button style={S.fab} onClick={()=>setShowAdd(true)}><span style={{fontSize:20,lineHeight:1}}>+</span> เพิ่มเมนู</button>
+
+      {/* ── AI Error Toast ── */}
+      {aiError && (
+        <div style={{ position:"fixed", top:20, left:"50%", transform:"translateX(-50%)", zIndex:999,
+          background:"#2C1A0E", color:"#FFD0B0", padding:"12px 20px", borderRadius:14,
+          fontSize:13, fontWeight:600, boxShadow:"0 4px 20px rgba(0,0,0,.3)",
+          maxWidth:340, textAlign:"center", fontFamily:"'Nunito',sans-serif" }}>
+          {aiError}
+        </div>
+      )}
 
       {/* ══════ ADD MODAL ══════ */}
       {showAdd&&(
