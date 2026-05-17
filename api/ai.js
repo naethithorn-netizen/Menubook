@@ -1,17 +1,19 @@
+// ทุก model ใช้ v1beta เหมือนกันหมด
 const MODELS = [
-  { name: "gemini-2.0-flash",      version: "v1beta" },
-  { name: "gemini-2.0-flash-lite", version: "v1beta" },
-  { name: "gemini-1.5-flash",      version: "v1"     },
-  { name: "gemini-1.5-flash-8b",   version: "v1"     },
+  "gemini-2.0-flash",
+  "gemini-2.0-flash-lite",
+  "gemini-1.5-flash",
+  "gemini-1.5-flash-8b",
+  "gemini-1.0-pro-vision-latest",
 ];
 
 async function callGemini(apiKey, parts, maxTokens, index = 0) {
   if (index >= MODELS.length) {
-    throw new Error("ทุก model ไม่ตอบสนอง — กรุณารอ 1 นาทีแล้วลองใหม่");
+    throw new Error("quota หมดสำหรับวันนี้ — รอพรุ่งนี้ quota จะรีเซ็ตอัตโนมัติ หรือเพิ่ม billing ใน Google AI Studio");
   }
 
-  const { name, version } = MODELS[index];
-  const url = `https://generativelanguage.googleapis.com/${version}/models/${name}:generateContent?key=${apiKey}`;
+  const name = MODELS[index];
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${name}:generateContent?key=${apiKey}`;
 
   let response, data;
   try {
@@ -24,74 +26,46 @@ async function callGemini(apiKey, parts, maxTokens, index = 0) {
       }),
     });
     data = await response.json();
-  } catch (fetchErr) {
-    console.error(`${name} fetch error:`, fetchErr.message);
+  } catch (e) {
     return callGemini(apiKey, parts, maxTokens, index + 1);
   }
 
-  // ถ้า rate limit, model ไม่รองรับ, หรือ error → ลอง model ถัดไป
   if (!response.ok || data.error) {
-    const reason = data.error?.message || `HTTP ${response.status}`;
-    console.log(`${name} failed: ${reason} → trying next model`);
-    await new Promise((r) => setTimeout(r, 500));
+    const msg = data.error?.message || "";
+    console.log(`${name} failed: ${msg.substring(0, 80)}`);
+    await new Promise((r) => setTimeout(r, 300));
     return callGemini(apiKey, parts, maxTokens, index + 1);
   }
 
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-  if (!text) {
-    console.log(`${name} returned empty text → trying next model`);
-    return callGemini(apiKey, parts, maxTokens, index + 1);
-  }
+  if (!text) return callGemini(apiKey, parts, maxTokens, index + 1);
 
-  console.log(`✅ Success with ${name}`);
   return text;
 }
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    return res.status(500).json({ error: "❌ GEMINI_API_KEY ยังไม่ได้ตั้งค่าใน Vercel Environment Variables" });
-  }
+  if (!apiKey) return res.status(500).json({ error: "GEMINI_API_KEY ยังไม่ได้ตั้งค่าใน Vercel" });
 
   try {
     const { messages, max_tokens } = req.body;
-    if (!messages?.length) {
-      return res.status(400).json({ error: "No messages provided" });
-    }
-
     const lastMessage = messages[messages.length - 1];
 
-    // แปลง Anthropic format → Gemini parts
     let parts = [];
     if (Array.isArray(lastMessage.content)) {
       for (const item of lastMessage.content) {
-        if (item.type === "text") {
-          parts.push({ text: item.text });
-        } else if (item.type === "image") {
-          parts.push({
-            inline_data: {
-              mime_type: item.source.media_type,
-              data: item.source.data,
-            },
-          });
-        }
+        if (item.type === "text") parts.push({ text: item.text });
+        else if (item.type === "image") parts.push({ inline_data: { mime_type: item.source.media_type, data: item.source.data } });
       }
     } else {
       parts.push({ text: String(lastMessage.content) });
     }
 
     const text = await callGemini(apiKey, parts, max_tokens);
-
-    // แปลงกลับเป็น Anthropic format
-    return res.status(200).json({
-      content: [{ type: "text", text }],
-    });
+    return res.status(200).json({ content: [{ type: "text", text }] });
   } catch (error) {
-    console.error("Handler error:", error.message);
     return res.status(500).json({ error: error.message });
   }
 }
